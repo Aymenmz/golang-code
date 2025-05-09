@@ -7,13 +7,14 @@ import (
 )
 
 type LeakyBucket struct {
-	capacity int
-	leakRate time.Duration
-	tokens   int
-	lastLeak time.Time
-	mu       sync.Mutex
+	capacity  int
+	leakRate  time.Duration
+	tokens    int
+	lastLeak  time.Time
+	mu        sync.Mutex
 }
 
+// NewLeakyBucket creates a new leaky bucket rate limiter
 func NewLeakyBucket(capacity int, leakRate time.Duration) *LeakyBucket {
 	return &LeakyBucket{
 		capacity: capacity,
@@ -23,49 +24,49 @@ func NewLeakyBucket(capacity int, leakRate time.Duration) *LeakyBucket {
 	}
 }
 
-func (lb *LeakyBucket) allow() bool {
+// Allow checks if a request can be processed based on the leak rate
+func (lb *LeakyBucket) Allow() bool {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
 
 	now := time.Now()
-	elaspedTime := now.Sub(lb.lastLeak)
-	tokenToAdd := int(elaspedTime / lb.leakRate)
-	lb.tokens += tokenToAdd
-	if lb.tokens > lb.capacity {
-		lb.tokens = lb.capacity
+	elapsedTime := now.Sub(lb.lastLeak)
+
+	// Calculate how many tokens to leak (i.e., how many slots freed)
+	tokensToAdd := int(elapsedTime / lb.leakRate)
+	if tokensToAdd > 0 {
+		lb.tokens += tokensToAdd
+		if lb.tokens > lb.capacity {
+			lb.tokens = lb.capacity
+		}
+		lb.lastLeak = lb.lastLeak.Add(time.Duration(tokensToAdd) * lb.leakRate)
 	}
 
-	lb.lastLeak = lb.lastLeak.Add(time.Duration(tokenToAdd) * lb.leakRate)
+	fmt.Printf("⏳ Tokens added: %d | Total tokens: %d | Time: %v\n", tokensToAdd, lb.tokens, lb.lastLeak)
 
-	fmt.Printf("Tokens added %d, Tokens substracted %d, Total tokens: %d\n", tokenToAdd, 1, lb.tokens)
-	fmt.Printf("Laast leak time: %v\n", lb.lastLeak)
 	if lb.tokens > 0 {
 		lb.tokens--
 		return true
 	}
 	return false
-
 }
 
 func main() {
-	leakyBucketInstance := NewLeakyBucket(5, 500*time.Millisecond)
+	bucket := NewLeakyBucket(5, 500*time.Millisecond)
 	var wg sync.WaitGroup
 
-	for range 10 {
+	for i := 1; i <= 10; i++ {
 		wg.Add(1)
-		go func() {
+		go func(id int) {
 			defer wg.Done()
-			if leakyBucketInstance.allow() {
-				fmt.Printf("Current Time: %v\n", time.Now())
-				fmt.Println("Request Allowed")
-				fmt.Println("-----------------------------------------------------------------------------------------------------")
+			if bucket.Allow() {
+				fmt.Printf("[%2d] ✅ Request allowed at %v\n", id, time.Now())
 			} else {
-				fmt.Printf("Current Time: %v\n", time.Now())
-				fmt.Println("Request Denied")
-				fmt.Println("-----------------------------------------------------------------------------------------------------")
-
+				fmt.Printf("[%2d] ❌ Request denied at %v\n", id, time.Now())
 			}
-		}()
+			fmt.Println("------------------------------------------------")
+		}(i)
+		time.Sleep(200 * time.Millisecond) // simulate staggered requests
 	}
 
 	wg.Wait()
